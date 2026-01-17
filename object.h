@@ -4,14 +4,67 @@
 #include <functional>
 #include <error.h>
 struct Enviromnent;
-class Object;
+class Heap;
+class Object {
+public:
+    virtual ~Object() = default;
+    virtual Object* Eval(Enviromnent& env) = 0;
+    virtual Object* Clone(Heap& heap) = 0;
+
+    bool IsMarked() const {
+        return marked_;
+    }
+
+    virtual void Mark() {
+        if (marked_) {
+            return;
+        }
+        marked_ = true;
+        for (Object* dep : dependencies_) {
+            if (dep) {
+                dep->Mark();
+            }
+        }
+    }
+
+    void Unmark() {
+        marked_ = false;
+    }
+
+protected:
+    Object() : marked_(false) {
+    }
+
+    void AddDependency(Object* obj) {
+        if (obj) {
+            dependencies_.push_back(obj);
+        }
+    }
+
+    void RemoveDependency(Object* obj) {
+        for (int i = 0; i < dependencies_.size(); ++i) {
+            if (dependencies_[i] == obj) {
+                dependencies_.erase(dependencies_.begin() + i);
+                return;
+            }
+        }
+    }
+
+private:
+    bool marked_;
+    std::vector<Object*> dependencies_;
+};
 
 class Heap {
 public:
     Heap() = default;
     Heap(const Heap&) = delete;
     Heap& operator=(const Heap&) = delete;
-
+    ~Heap() {
+        for (Object* obj : objects_) {
+            delete obj;
+        }
+    }
     template <class T, class... Args>
     T* Make(Args&&... args) {
         static_assert(std::is_base_of<Object, T>::value, "нужно наследование от Object");
@@ -86,55 +139,6 @@ struct Enviromnent {
         throw NameError("");
     }
 };
-class Object {
-public:
-    virtual ~Object() = default;
-    virtual Object* Eval(Enviromnent& env) = 0;
-    virtual Object* Clone(Heap& heap) = 0;
-
-    bool IsMarked() const {
-        return marked_;
-    }
-
-    virtual void Mark() {
-        if (marked_) {
-            return;
-        }
-        marked_ = true;
-        for (Object* dep : dependencies_) {
-            if (dep) {
-                dep->Mark();
-            }
-        }
-    }
-
-    void Unmark() {
-        marked_ = false;
-    }
-
-protected:
-    Object() : marked_(false) {
-    }
-
-    void AddDependency(Object* obj) {
-        if (obj) {
-            dependencies_.push_back(obj);
-        }
-    }
-
-    void RemoveDependency(Object* obj) {
-        for (int i = 0; i < dependencies_.size(); ++i) {
-            if (dependencies_[i] == obj) {
-                dependencies_.erase(dependencies_.begin() + i);
-                return;
-            }
-        }
-    }
-
-private:
-    bool marked_;
-    std::vector<Object*> dependencies_;
-};
 
 struct Callable : Object {
     virtual Object* Apply(const std::vector<Object*>& args, Enviromnent& env) = 0;
@@ -164,8 +168,7 @@ private:
 };
 class LambdaFunction : public Callable {
 public:
-    LambdaFunction(const std::vector<std::string>& params,
-                   const std::vector<Object*>& body,
+    LambdaFunction(const std::vector<std::string>& params, const std::vector<Object*>& body,
                    Enviromnent* env)
         : params_(params), body_(body) {
         if (env->parent_ == nullptr) {
